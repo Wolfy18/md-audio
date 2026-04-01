@@ -1,0 +1,143 @@
+{
+  "name": "md-audio",
+  "displayName": "MD Audio",
+  "description": "Offline-first Markdown read-aloud for VS Code and Cursor powered by a Rust core and system TTS.",
+  "version": "0.0.1",
+  "publisher": "wleon",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "markdown",
+    "audio",
+    "tts",
+    "cursor",
+    "vscode",
+    "rust"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onCommand:mdAudio.speakDocument",
+    "onCommand:mdAudio.speakFromCursor",
+    "onCommand:mdAudio.speakSelection",
+    "onCommand:mdAudio.stop",
+    "onCommand:mdAudio.selectVoice",
+    "onCommand:mdAudio.listVoices",
+    "onCommand:mdAudio.checkBackend"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "clean": "node ./scripts/clean.mjs",
+    "compile": "tsc -p ./tsconfig.json",
+    "build:native": "node ./scripts/build-native.mjs",
+    "build": "npm run build:native && npm run compile",
+    "test:native": "node ./scripts/test-native.mjs",
+    "test:ts": "npm run compile && node --test dist/test",
+    "test": "npm run test:native && npm run test:ts",
+    "package:vsix": "node ./scripts/package-vsix.mjs"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "mdAudio.speakDocument",
+        "title": "Listen to Document",
+        "category": "MD Audio",
+        "icon": "$(unmute)"
+      },
+      {
+        "command": "mdAudio.speakFromCursor",
+        "title": "Listen From Cursor",
+        "category": "MD Audio",
+        "icon": "$(play)"
+      },
+      {
+        "command": "mdAudio.speakSelection",
+        "title": "Listen to Selection",
+        "category": "MD Audio",
+        "icon": "$(selection)"
+      },
+      {
+        "command": "mdAudio.stop",
+        "title": "Stop",
+        "category": "MD Audio",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "mdAudio.selectVoice",
+        "title": "Select Voice",
+        "category": "MD Audio"
+      },
+      {
+        "command": "mdAudio.listVoices",
+        "title": "List Voices",
+        "category": "MD Audio"
+      },
+      {
+        "command": "mdAudio.checkBackend",
+        "title": "Check Backend",
+        "category": "MD Audio"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mdAudio.speakDocument",
+          "group": "navigation@50",
+          "when": "editorLangId == markdown && config.mdAudio.showEditorButtons"
+        },
+        {
+          "command": "mdAudio.stop",
+          "group": "navigation@49",
+          "when": "editorLangId == markdown && config.mdAudio.showEditorButtons"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MD Audio",
+      "properties": {
+        "mdAudio.voice": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred system TTS voice identifier."
+        },
+        "mdAudio.rate": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.5,
+          "maximum": 2,
+          "description": "Speech rate multiplier applied by the native backend."
+        },
+        "mdAudio.highlightCurrentUtterance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight the currently spoken Markdown range in the active editor."
+        },
+        "mdAudio.showEditorButtons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Listen and Stop buttons in the Markdown editor title."
+        },
+        "mdAudio.enabledLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "markdown"
+          ],
+          "description": "Language identifiers that are allowed to use MD Audio commands."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.7.1",
+    "typescript": "^5.8.3"
+  }
+}

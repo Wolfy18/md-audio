@@ -1,0 +1,10 @@
+src/**
+scripts/**
+native/**
+dist/test/**
+**/*.map
+.cargo-home/**
+node_modules/**
+package-lock.json
+.gitignore
+tsconfig.json
