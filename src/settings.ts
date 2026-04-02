@@ -7,6 +7,8 @@ export interface ConfigurationReader {
 export interface MdAudioSettings {
   backend: "auto" | "system" | "mlx-kokoro";
   voice: string;
+  mlxEnglishVoice: string;
+  mlxSpanishVoice: string;
   rate: number;
   highlightCurrentUtterance: boolean;
   showEditorButtons: boolean;
@@ -19,6 +21,8 @@ export function readSettings(configuration: ConfigurationReader): MdAudioSetting
   return {
     backend: normalizeBackend(configuration.get("backend", "auto")),
     voice: configuration.get("voice", "").trim(),
+    mlxEnglishVoice: configuration.get("mlxEnglishVoice", "").trim(),
+    mlxSpanishVoice: configuration.get("mlxSpanishVoice", "").trim(),
     rate: clampSpeed(configuration.get("rate", DEFAULT_SPEED)),
     highlightCurrentUtterance: configuration.get("highlightCurrentUtterance", true),
     showEditorButtons: configuration.get("showEditorButtons", true),

@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use md_audio_native::language::{SupportedLanguage, detect_supported_language};
-use md_audio_native::markdown::{Utterance, parse_markdown};
-use md_audio_native::protocol::{Message, PreparedUtterance, Request};
+use md_audio_native::markdown::{Utterance, UtteranceKind, parse_markdown};
+use md_audio_native::protocol::{Message, PreparedUtterance, PreparedUtteranceKind, Request};
 use md_audio_native::speech::{SpeechEngine, SpeechEvent};
 use md_audio_native::summary::summarize_utterances;
 use tts::UtteranceId;
@@ -142,6 +142,7 @@ impl AppState {
                         text: utterance.text,
                         start_offset: utterance.start_offset,
                         end_offset: utterance.end_offset,
+                        kind: map_utterance_kind(utterance.kind),
                     })
                     .collect();
 
@@ -169,6 +170,7 @@ impl AppState {
                         text: utterance.text,
                         start_offset: utterance.start_offset,
                         end_offset: utterance.end_offset,
+                        kind: map_utterance_kind(utterance.kind),
                     })
                     .collect();
 
@@ -356,6 +358,16 @@ impl AppState {
     }
 }
 
+fn map_utterance_kind(kind: UtteranceKind) -> PreparedUtteranceKind {
+    match kind {
+        UtteranceKind::Heading => PreparedUtteranceKind::Heading,
+        UtteranceKind::Paragraph => PreparedUtteranceKind::Paragraph,
+        UtteranceKind::Item => PreparedUtteranceKind::Item,
+        UtteranceKind::BlockQuote => PreparedUtteranceKind::BlockQuote,
+        UtteranceKind::TableRow => PreparedUtteranceKind::TableRow,
+    }
+}
+
 fn utterance_key(utterance_id: &UtteranceId) -> String {
     format!("{utterance_id:?}")
 }
@@ -489,7 +501,7 @@ fn select_utterances(
 #[cfg(test)]
 mod tests {
     use super::select_utterances;
-    use md_audio_native::markdown::Utterance;
+    use md_audio_native::markdown::{Utterance, UtteranceKind};
 
     #[test]
     fn selects_from_cursor_forward() {
@@ -498,11 +510,13 @@ mod tests {
                 text: "One".to_string(),
                 start_offset: 0,
                 end_offset: 4,
+                kind: UtteranceKind::Paragraph,
             },
             Utterance {
                 text: "Two".to_string(),
                 start_offset: 5,
                 end_offset: 9,
+                kind: UtteranceKind::Paragraph,
             },
         ];
 
@@ -518,16 +532,19 @@ mod tests {
                 text: "One".to_string(),
                 start_offset: 0,
                 end_offset: 4,
+                kind: UtteranceKind::Paragraph,
             },
             Utterance {
                 text: "Two".to_string(),
                 start_offset: 5,
                 end_offset: 9,
+                kind: UtteranceKind::Paragraph,
             },
             Utterance {
                 text: "Three".to_string(),
                 start_offset: 10,
                 end_offset: 16,
+                kind: UtteranceKind::Paragraph,
             },
         ];
 

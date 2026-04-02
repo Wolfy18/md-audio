@@ -10,6 +10,8 @@ test("reads settings with defaults", () => {
   });
 
   assert.equal(settings.voice, "");
+  assert.equal(settings.mlxEnglishVoice, "");
+  assert.equal(settings.mlxSpanishVoice, "");
   assert.equal(settings.backend, "auto");
   assert.equal(settings.rate, 1);
   assert.deepEqual(settings.enabledLanguages, ["markdown"]);
@@ -26,6 +28,12 @@ test("normalizes the configured voice and languages", () => {
       if (key === "voice") {
         return "  com.apple.voice  " as typeof defaultValue;
       }
+      if (key === "mlxEnglishVoice") {
+        return "  af_bella  " as typeof defaultValue;
+      }
+      if (key === "mlxSpanishVoice") {
+        return "  em_alex  " as typeof defaultValue;
+      }
       if (key === "enabledLanguages") {
         return ["markdown", " mdx "] as typeof defaultValue;
       }
@@ -35,6 +43,8 @@ test("normalizes the configured voice and languages", () => {
 
   assert.equal(settings.backend, "mlx-kokoro");
   assert.equal(settings.voice, "com.apple.voice");
+  assert.equal(settings.mlxEnglishVoice, "af_bella");
+  assert.equal(settings.mlxSpanishVoice, "em_alex");
   assert.deepEqual(settings.enabledLanguages, ["markdown", "mdx"]);
 });
 

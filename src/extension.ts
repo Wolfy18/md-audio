@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import { HighlightController, type HighlightTarget } from "./highlightController";
 import {
   batchPreparedUtterances,
+  mlxVoiceLanguage,
   MLX_BACKEND_ID,
-  MLX_FIXED_SPEAKER,
   MLX_STOPPED_MESSAGE,
   MlxBackend,
   resolveMlxVoice,
@@ -62,6 +62,7 @@ const decorationType = vscode.window.createTextEditorDecorationType({
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("MD Audio");
   const listenStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 130);
+  const summaryStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 129.5);
   const speedStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 129);
   const stopStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 128);
   const bridge = new NativeBridge({
@@ -117,12 +118,18 @@ export function activate(context: vscode.ExtensionContext): void {
     const hasEligibleEditor = isEligibleEditor(activeEditor);
     const isActiveDocumentPlaying =
       !!currentPlayback && activeEditor?.document.uri.toString() === currentPlayback.documentId;
+    const isSummaryPlaying = isActiveDocumentPlaying && currentPlayback?.mode === "summary";
     const hasPlayback = !!currentPlayback;
     const settings = getSettings();
 
-    listenStatusItem.text = isActiveDocumentPlaying ? "$(sync~spin) Listening" : "$(unmute) Listen";
+    listenStatusItem.text =
+      isActiveDocumentPlaying && !isSummaryPlaying ? "$(sync~spin) Listen Doc" : "$(unmute) Listen Doc";
     listenStatusItem.tooltip = "Listen to the current Markdown document";
     listenStatusItem.command = "mdAudio.speakDocument";
+
+    summaryStatusItem.text = isSummaryPlaying ? "$(sync~spin) Summary" : "$(list-tree) Summary";
+    summaryStatusItem.tooltip = "Listen to a summary of the current Markdown document";
+    summaryStatusItem.command = "mdAudio.speakSummary";
 
     speedStatusItem.text = `$(dashboard) ${formatSpeed(settings.rate)}`;
     speedStatusItem.tooltip = "Change MD Audio speed";
@@ -134,8 +141,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     if (hasEligibleEditor) {
       listenStatusItem.show();
+      summaryStatusItem.show();
     } else {
       listenStatusItem.hide();
+      summaryStatusItem.hide();
     }
 
     if (hasEligibleEditor || hasPlayback) {
@@ -332,11 +341,10 @@ export function activate(context: vscode.ExtensionContext): void {
     rate: number,
     backend: PlaybackBackend,
     mode: ListenMode,
+    backendVoiceLabel?: string,
   ): Promise<void> => {
     const backendLabel =
-      backend === MLX_BACKEND_ID
-        ? `local Kokoro speaker ${MLX_FIXED_SPEAKER.name}`
-        : "system voice";
+      backendVoiceLabel ?? (backend === MLX_BACKEND_ID ? "local Kokoro voice" : "system voice");
     const action = await vscode.window.showInformationMessage(
       `MD Audio ${mode === "summary" ? "summary" : "playback"} started with ${backendLabel} at ${formatSpeed(rate)}.`,
       "Change Speed",
@@ -399,7 +407,7 @@ export function activate(context: vscode.ExtensionContext): void {
     updatePlaybackControls();
 
     if (showNotice) {
-      void showPlaybackStartedNotice(rate, "system", mode);
+      void showPlaybackStartedNotice(rate, "system", mode, "system voice");
     }
   };
 
@@ -421,6 +429,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const batches = batchPreparedUtterances(prepared.utterances);
+    const languageCode = MlxBackend.resolveLanguageCode(prepared.languageCode);
+    const selectedVoice = resolveMlxVoice(settings, languageCode);
     const token = ++nextPlaybackToken;
     void mlx
       .playPrepared(
@@ -429,7 +439,7 @@ export function activate(context: vscode.ExtensionContext): void {
           documentId: document.uri.toString(),
           utterances: prepared.utterances,
           batches,
-          languageCode: prepared.languageCode,
+          languageCode,
           rate,
         },
         handleUtteranceEvent,
@@ -458,7 +468,12 @@ export function activate(context: vscode.ExtensionContext): void {
     updatePlaybackControls();
 
     if (showNotice) {
-      void showPlaybackStartedNotice(rate, MLX_BACKEND_ID, mode);
+      void showPlaybackStartedNotice(
+        rate,
+        MLX_BACKEND_ID,
+        mode,
+        `local Kokoro voice ${selectedVoice.name}`,
+      );
     }
   };
 
@@ -546,9 +561,51 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   const showMlxVoicePicker = async (): Promise<void> => {
-    const voice = resolveMlxVoice();
-    await vscode.window.showInformationMessage(
-      `MD Audio local Kokoro playback is locked to ${voice.name}.`,
+    const settings = getSettings();
+    const currentEnglishVoice = resolveMlxVoice(settings, "en").id;
+    const currentSpanishVoice = resolveMlxVoice(settings, "es").id;
+    const selected = await vscode.window.showQuickPick(
+      mlx.listVoices().map((voice) => {
+        const languageCode = mlxVoiceLanguage(voice);
+        const isCurrent =
+          languageCode === "es"
+            ? currentSpanishVoice === voice.id
+            : currentEnglishVoice === voice.id;
+
+        return {
+          label: voice.name,
+          description: voice.locale ?? voice.id,
+          detail: [
+            languageCode === "es" ? "Spanish" : "English",
+            voice.id,
+            voice.gender,
+            isCurrent ? "Current voice" : undefined,
+          ]
+            .filter(Boolean)
+            .join(" | "),
+          languageCode,
+          voiceId: voice.id,
+        };
+      }),
+      {
+        title: "Select the Kokoro voice for English or Spanish playback",
+        matchOnDescription: true,
+        matchOnDetail: true,
+      },
+    );
+
+    if (!selected) {
+      return;
+    }
+
+    const configurationKey =
+      selected.languageCode === "es" ? "mlxSpanishVoice" : "mlxEnglishVoice";
+    await vscode.workspace
+      .getConfiguration("mdAudio")
+      .update(configurationKey, selected.voiceId, vscode.ConfigurationTarget.Global);
+
+    void vscode.window.showInformationMessage(
+      `MD Audio ${selected.languageCode === "es" ? "Spanish" : "English"} Kokoro voice set to ${selected.label}.`,
     );
   };
 
@@ -564,6 +621,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     listenStatusItem,
+    summaryStatusItem,
     speedStatusItem,
     stopStatusItem,
     decorationType,

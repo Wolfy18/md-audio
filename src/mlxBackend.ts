@@ -5,7 +5,7 @@ import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import { supportsMlxLocal } from "./platform";
-import type { NativeUtteranceEvent, NativeVoice, PreparedUtterance } from "./protocol";
+import type { NativeUtteranceEvent, NativeVoice, PreparedUtterance, PreparedUtteranceKind } from "./protocol";
 import type { MdAudioSettings } from "./settings";
 
 export const MLX_BACKEND_ID = "mlx-kokoro";
@@ -25,14 +25,49 @@ const KOKORO_REQUIRED_PYTHON_MODULES = [
   "en_core_web_sm",
 ] as const;
 const MLX_REQUIRED_PACKAGES = ["mlx-audio", "misaki", "num2words", "spacy", "phonemizer-fork", "espeakng-loader"] as const;
-export const MLX_FIXED_SPEAKER: NativeVoice = {
-  id: "am_adam",
-  name: "Adam",
-  locale: "en/es",
-  gender: "male",
-};
+const createVoice = (id: string, name: string, locale: string, gender: string): NativeVoice => ({
+  id,
+  name,
+  locale,
+  gender,
+});
 
-export const KOKORO_SPEAKERS: readonly NativeVoice[] = [MLX_FIXED_SPEAKER] as const;
+export const DEFAULT_KOKORO_ENGLISH_VOICE_ID = "af_bella";
+export const DEFAULT_KOKORO_SPANISH_VOICE_ID = "ef_dora";
+
+export const KOKORO_ENGLISH_SPEAKERS: readonly NativeVoice[] = [
+  createVoice("af_alloy", "Alloy", "en-US", "female"),
+  createVoice("af_aoede", "Aoede", "en-US", "female"),
+  createVoice("af_bella", "Bella", "en-US", "female"),
+  createVoice("af_heart", "Heart", "en-US", "female"),
+  createVoice("af_jessica", "Jessica", "en-US", "female"),
+  createVoice("af_kore", "Kore", "en-US", "female"),
+  createVoice("af_nicole", "Nicole", "en-US", "female"),
+  createVoice("af_nova", "Nova", "en-US", "female"),
+  createVoice("af_river", "River", "en-US", "female"),
+  createVoice("af_sarah", "Sarah", "en-US", "female"),
+  createVoice("af_sky", "Sky", "en-US", "female"),
+  createVoice("am_adam", "Adam", "en-US", "male"),
+  createVoice("am_echo", "Echo", "en-US", "male"),
+  createVoice("am_eric", "Eric", "en-US", "male"),
+  createVoice("am_fenrir", "Fenrir", "en-US", "male"),
+  createVoice("am_liam", "Liam", "en-US", "male"),
+  createVoice("am_michael", "Michael", "en-US", "male"),
+  createVoice("am_onyx", "Onyx", "en-US", "male"),
+  createVoice("am_puck", "Puck", "en-US", "male"),
+  createVoice("am_santa", "Santa", "en-US", "male"),
+] as const;
+
+export const KOKORO_SPANISH_SPEAKERS: readonly NativeVoice[] = [
+  createVoice("ef_dora", "Dora", "es-ES", "female"),
+  createVoice("em_alex", "Alex", "es-ES", "male"),
+  createVoice("em_santa", "Santa", "es-ES", "male"),
+] as const;
+
+export const KOKORO_SPEAKERS: readonly NativeVoice[] = [
+  ...KOKORO_ENGLISH_SPEAKERS,
+  ...KOKORO_SPANISH_SPEAKERS,
+] as const;
 
 export type PlaybackLanguage = "en" | "es";
 
@@ -95,6 +130,9 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
+const TERMINAL_PUNCTUATION = /[.!?…]$/u;
+const CONTINUATION_PUNCTUATION = /[,;:]$/u;
+
 export function isMlxSupportedPlatform(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
@@ -106,16 +144,35 @@ export function normalizeMlxLanguage(languageCode: string | undefined): Playback
   return languageCode === "es" ? "es" : "en";
 }
 
-export function mlxVoicesForLanguage(_languageCode: PlaybackLanguage): readonly NativeVoice[] {
-  return [MLX_FIXED_SPEAKER];
+export function mlxVoicesForLanguage(languageCode: PlaybackLanguage): readonly NativeVoice[] {
+  return languageCode === "es" ? KOKORO_SPANISH_SPEAKERS : KOKORO_ENGLISH_SPEAKERS;
 }
 
-export function resolveMlxVoice(): NativeVoice {
-  return MLX_FIXED_SPEAKER;
+export function mlxVoiceLanguage(voice: NativeVoice): PlaybackLanguage {
+  return voice.locale?.startsWith("es") ? "es" : "en";
+}
+
+export function resolveMlxVoice(settings: MdAudioSettings, languageCode: PlaybackLanguage): NativeVoice {
+  const configuredVoiceId =
+    languageCode === "es" ? settings.mlxSpanishVoice.trim() : settings.mlxEnglishVoice.trim();
+  const matchingVoices = mlxVoicesForLanguage(languageCode);
+  const matchingVoice = matchingVoices.find((voice) => voice.id === configuredVoiceId);
+
+  if (matchingVoice) {
+    return matchingVoice;
+  }
+
+  const fallbackVoiceId =
+    languageCode === "es" ? DEFAULT_KOKORO_SPANISH_VOICE_ID : DEFAULT_KOKORO_ENGLISH_VOICE_ID;
+  return matchingVoices.find((voice) => voice.id === fallbackVoiceId) ?? matchingVoices[0];
 }
 
 export function kokoroLanguageCode(languageCode: PlaybackLanguage): string {
-  return languageCode === "es" ? "e" : "a";
+  if (languageCode === "es") {
+    return "e";
+  }
+
+  return "a";
 }
 
 export function managedMlxEnvironmentPath(storagePath: string): string {
@@ -192,7 +249,7 @@ export function batchPreparedUtterances(
     batches.push({
       utteranceIndex: firstUtterance.utterance_index,
       utteranceCount: currentBatch.length,
-      text: currentBatch.map((utterance) => utterance.text).join(" "),
+      text: renderBatchText(currentBatch),
       startOffset: firstUtterance.start_offset,
       endOffset: lastUtterance.end_offset,
     });
@@ -202,26 +259,55 @@ export function batchPreparedUtterances(
   };
 
   for (const utterance of utterances) {
-    const utteranceText = utterance.text.trim();
+    const utteranceText = normalizeUtteranceForSpeech(utterance.text);
     if (!utteranceText) {
       continue;
     }
 
-    const separatorLength = currentBatch.length === 0 ? 0 : 1;
+    const lastUtterance = currentBatch[currentBatch.length - 1];
+    const requiresStrongBoundary =
+      currentBatch.length > 0 &&
+      (isHeadingLikeUtterance(lastUtterance.kind) || isHeadingLikeUtterance(utterance.kind));
+
+    const separatorLength = currentBatch.length === 0 ? 0 : 2;
     const nextLength = currentLength + separatorLength + utteranceText.length;
     const wouldOverflow = currentBatch.length > 0 && nextLength > maxCharacters;
     const reachedBatchLimit = currentBatch.length >= maxUtterances;
 
-    if (wouldOverflow || reachedBatchLimit) {
+    if (requiresStrongBoundary || wouldOverflow || reachedBatchLimit) {
       flushBatch();
     }
 
     currentBatch.push(utterance);
-    currentLength += (currentBatch.length === 1 ? 0 : 1) + utteranceText.length;
+    currentLength += (currentBatch.length === 1 ? 0 : 2) + utteranceText.length;
   }
 
   flushBatch();
   return batches;
+}
+
+function isHeadingLikeUtterance(kind: PreparedUtteranceKind): boolean {
+  return kind === "heading";
+}
+
+function renderBatchText(utterances: readonly PreparedUtterance[]): string {
+  return utterances
+    .map((utterance) => normalizeUtteranceForSpeech(utterance.text))
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+}
+
+export function normalizeUtteranceForSpeech(text: string): string {
+  const normalized = text.trim().replace(/\s+/gu, " ");
+  if (!normalized) {
+    return "";
+  }
+
+  if (TERMINAL_PUNCTUATION.test(normalized) || CONTINUATION_PUNCTUATION.test(normalized)) {
+    return normalized;
+  }
+
+  return `${normalized}.`;
 }
 
 export class MlxBackend {
@@ -258,8 +344,8 @@ export class MlxBackend {
     return normalizeMlxLanguage(languageCode);
   }
 
-  static speakerForLanguage(_settings: MdAudioSettings, _languageCode: PlaybackLanguage): string {
-    return resolveMlxVoice().id;
+  static speakerForLanguage(settings: MdAudioSettings, languageCode: PlaybackLanguage): string {
+    return resolveMlxVoice(settings, languageCode).id;
   }
 
   static isPreferredPlatform(): boolean {
@@ -312,7 +398,9 @@ export class MlxBackend {
 
     const playbackId = ++this.currentPlaybackId;
     const languageCode = normalizeMlxLanguage(prepared.languageCode);
-    const speaker = resolveMlxVoice().id;
+    const selectedVoice = resolveMlxVoice(settings, languageCode);
+    const speaker = selectedVoice.id;
+    const langCode = kokoroLanguageCode(languageCode);
     const batches = prepared.batches ?? batchPreparedUtterances(prepared.utterances);
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "md-audio-mlx-"));
     this.currentTempDir = tempDir;
@@ -336,7 +424,7 @@ export class MlxBackend {
           batch.text,
           audioPath,
           speaker,
-          languageCode,
+          langCode,
           prepared.rate,
           playbackId,
         );
@@ -564,7 +652,7 @@ export class MlxBackend {
     text: string,
     outputPath: string,
     speaker: string,
-    languageCode: PlaybackLanguage,
+    langCode: string,
     rate: number,
     playbackId: number,
   ): Promise<void> {
@@ -576,7 +664,7 @@ export class MlxBackend {
         model: settings.mlxModel,
         text,
         voice: speaker,
-        lang_code: kokoroLanguageCode(languageCode),
+        lang_code: langCode,
         speed: rate,
         output_path: outputPath,
       });

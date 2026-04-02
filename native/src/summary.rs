@@ -184,7 +184,7 @@ fn is_title_candidate(utterance: Option<&Utterance>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::summarize_utterances;
-    use crate::markdown::Utterance;
+    use crate::markdown::{Utterance, UtteranceKind};
 
     #[test]
     fn keeps_short_documents_intact() {
@@ -225,6 +225,11 @@ mod tests {
             text: text.to_string(),
             start_offset,
             end_offset: start_offset + text.len(),
+            kind: if text.ends_with(['.', '!', '?', ';', ':']) {
+                UtteranceKind::Paragraph
+            } else {
+                UtteranceKind::Heading
+            },
         }
     }
 }

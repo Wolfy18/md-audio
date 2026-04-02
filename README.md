@@ -7,12 +7,12 @@ MD Audio is a VS Code and Cursor extension that reads Markdown aloud offline thr
 - Live read-aloud for the whole Markdown document, from the current cursor, or from the current selection
 - Offline summary playback that extracts the key parts of a Markdown file and reads them aloud
 - English and Spanish document support only
-- Automatic English/Spanish document detection with one fixed local speaker for MLX playback
+- Automatic English/Spanish document detection with configurable American English and Spanish Kokoro voices
 - Local MLX/Kokoro playback on Apple Silicon with system TTS fallback
-- MLX/Kokoro synthesis batches consecutive passages to reduce voice drift between lines
+- MLX/Kokoro synthesis batches consecutive passages with stronger sentence pauses so playback sounds more natural
 - Rust markdown parser connected to the extension host over JSON lines on stdio
 - Highlighting for the currently spoken utterance during playback
-- Status bar playback controls for Listen, Stop, and speed changes while reading
+- Status bar playback controls for document listen, summary listen, stop, and speed changes while reading
 
 ## Commands
 
@@ -26,7 +26,7 @@ MD Audio is a VS Code and Cursor extension that reads Markdown aloud offline thr
 - `MD Audio: List Voices`
 - `MD Audio: Check Backend`
 
-`MD Audio: Select Voice` still selects the system voice when you use the system backend. The local MLX/Kokoro backend is locked to one fixed speaker.
+`MD Audio: Select Voice` selects the system voice on the system backend, or lets you choose separate Kokoro voices for English and Spanish playback on the local MLX backend.
 
 ## Development
 

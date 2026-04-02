@@ -5,11 +5,19 @@ export interface NativeVoice {
   gender?: string;
 }
 
+export type PreparedUtteranceKind =
+  | "heading"
+  | "paragraph"
+  | "item"
+  | "block_quote"
+  | "table_row";
+
 export interface PreparedUtterance {
   utterance_index: number;
   text: string;
   start_offset: number;
   end_offset: number;
+  kind: PreparedUtteranceKind;
 }
 
 export interface NativeUtteranceEvent {

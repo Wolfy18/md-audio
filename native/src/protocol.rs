@@ -52,11 +52,22 @@ pub struct VoiceInfo {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreparedUtteranceKind {
+    Heading,
+    Paragraph,
+    Item,
+    BlockQuote,
+    TableRow,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct PreparedUtterance {
     pub utterance_index: usize,
     pub text: String,
     pub start_offset: usize,
     pub end_offset: usize,
+    pub kind: PreparedUtteranceKind,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -2,9 +2,18 @@
   "name": "md-audio",
   "displayName": "MD Audio",
   "description": "Markdown read-aloud for VS Code and Cursor powered by a Rust core, local Kokoro TTS on Apple Silicon, and system TTS fallback.",
-  "version": "0.0.18",
+  "version": "0.0.21",
   "publisher": "wleon",
+  "author": "Wolfgang Leon",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Wolfy18/md-audio.git"
+  },
+  "homepage": "https://github.com/Wolfy18/md-audio",
+  "bugs": {
+    "url": "https://github.com/Wolfy18/md-audio/issues"
+  },
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -122,6 +131,16 @@
           "type": "string",
           "default": "",
           "description": "Preferred system TTS voice identifier when using the system backend."
+        },
+        "mdAudio.mlxEnglishVoice": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred Kokoro voice identifier for English playback. Leave empty to use MD Audio's default English voice."
+        },
+        "mdAudio.mlxSpanishVoice": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred Kokoro voice identifier for Spanish playback. Leave empty to use MD Audio's default Spanish voice."
         },
         "mdAudio.backend": {
           "type": "string",

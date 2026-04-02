@@ -2,11 +2,21 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UtteranceKind {
+    Heading,
+    Paragraph,
+    Item,
+    BlockQuote,
+    TableRow,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Utterance {
     pub text: String,
     pub start_offset: usize,
     pub end_offset: usize,
+    pub kind: UtteranceKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,7 +126,7 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
             Event::End(tag) => match tag {
                 TagEnd::Heading(_) => {
                     if let Some(Context::Heading { text, range }) = stack.pop() {
-                        finalize_text(&mut utterances, text, range);
+                        finalize_text(&mut utterances, text, range, UtteranceKind::Heading);
                     }
                 }
                 TagEnd::Paragraph => {
@@ -126,7 +136,7 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                                 parent.absorb_segment(&text, segment_range);
                             }
                         } else {
-                            finalize_text(&mut utterances, text, range);
+                            finalize_text(&mut utterances, text, range, UtteranceKind::Paragraph);
                         }
                     }
                 }
@@ -142,12 +152,12 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                             Some(false) => format!("To do: {text}"),
                             None => text,
                         };
-                        finalize_text(&mut utterances, rendered, range);
+                        finalize_text(&mut utterances, rendered, range, UtteranceKind::Item);
                     }
                 }
                 TagEnd::BlockQuote(_) => {
                     if let Some(Context::BlockQuote { text, range }) = stack.pop() {
-                        finalize_text(&mut utterances, text, range);
+                        finalize_text(&mut utterances, text, range, UtteranceKind::BlockQuote);
                     }
                 }
                 TagEnd::TableHead => {
@@ -158,7 +168,7 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                     }) = stack.pop()
                     {
                         let text = render_table_row(&cells, is_header);
-                        finalize_text(&mut utterances, text, range);
+                        finalize_text(&mut utterances, text, range, UtteranceKind::TableRow);
                     }
                 }
                 TagEnd::TableCell => {
@@ -187,7 +197,7 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                     }) = stack.pop()
                     {
                         let text = render_table_row(&cells, is_header);
-                        finalize_text(&mut utterances, text, range);
+                        finalize_text(&mut utterances, text, range, UtteranceKind::TableRow);
                     }
                 }
                 TagEnd::CodeBlock | TagEnd::MetadataBlock(_) | TagEnd::Image => {
@@ -244,7 +254,12 @@ fn nearest_parent_context(stack: &mut [Context]) -> Option<&mut Context> {
         .find(|context| matches!(context, Context::Item { .. } | Context::BlockQuote { .. }))
 }
 
-fn finalize_text(utterances: &mut Vec<Utterance>, raw_text: String, range: Option<Range<usize>>) {
+fn finalize_text(
+    utterances: &mut Vec<Utterance>,
+    raw_text: String,
+    range: Option<Range<usize>>,
+    kind: UtteranceKind,
+) {
     let Some(range) = range else {
         return;
     };
@@ -260,6 +275,7 @@ fn finalize_text(utterances: &mut Vec<Utterance>, raw_text: String, range: Optio
             text: chunk,
             start_offset: range.start,
             end_offset: range.end.max(range.start),
+            kind,
         });
     }
 }
