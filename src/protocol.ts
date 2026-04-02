@@ -5,6 +5,13 @@ export interface NativeVoice {
   gender?: string;
 }
 
+export interface PreparedUtterance {
+  utterance_index: number;
+  text: string;
+  start_offset: number;
+  end_offset: number;
+}
+
 export interface NativeUtteranceEvent {
   type: "utterance_begin" | "utterance_end";
   document_id: string;
@@ -42,6 +49,22 @@ export interface LoadDocumentResult {
   utterance_count: number;
 }
 
+export interface PrepareSpeechResult {
+  id: string;
+  type: "prepare_speech_result";
+  document_id: string;
+  language_code?: string;
+  utterances: PreparedUtterance[];
+}
+
+export interface PrepareSummaryResult {
+  id: string;
+  type: "prepare_summary_result";
+  document_id: string;
+  language_code?: string;
+  utterances: PreparedUtterance[];
+}
+
 export interface SpeakResult {
   id: string;
   type: "speak_result";
@@ -65,6 +88,8 @@ export type NativeResponse =
   | InitResult
   | ListVoicesResult
   | LoadDocumentResult
+  | PrepareSpeechResult
+  | PrepareSummaryResult
   | SpeakResult
   | StopResult
   | ErrorResult;
@@ -86,12 +111,34 @@ export interface LoadDocumentRequest {
   text: string;
 }
 
+export interface PrepareSpeechRequest {
+  id: string;
+  type: "prepare_speech";
+  document_id: string;
+  start_offset?: number;
+  end_offset?: number;
+}
+
+export interface PrepareSummaryRequest {
+  id: string;
+  type: "prepare_summary";
+  document_id: string;
+}
+
 export interface SpeakRequest {
   id: string;
   type: "speak";
   document_id: string;
   start_offset?: number;
   end_offset?: number;
+  voice_id?: string;
+  rate: number;
+}
+
+export interface SpeakSummaryRequest {
+  id: string;
+  type: "speak_summary";
+  document_id: string;
   voice_id?: string;
   rate: number;
 }
@@ -105,6 +152,8 @@ export type NativeRequest =
   | InitRequest
   | ListVoicesRequest
   | LoadDocumentRequest
+  | PrepareSpeechRequest
+  | PrepareSummaryRequest
   | SpeakRequest
+  | SpeakSummaryRequest
   | StopRequest;
-

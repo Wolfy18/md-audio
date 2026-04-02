@@ -14,11 +14,27 @@ pub enum Request {
         document_id: String,
         text: String,
     },
+    PrepareSpeech {
+        id: String,
+        document_id: String,
+        start_offset: Option<usize>,
+        end_offset: Option<usize>,
+    },
+    PrepareSummary {
+        id: String,
+        document_id: String,
+    },
     Speak {
         id: String,
         document_id: String,
         start_offset: Option<usize>,
         end_offset: Option<usize>,
+        voice_id: Option<String>,
+        rate: f32,
+    },
+    SpeakSummary {
+        id: String,
+        document_id: String,
         voice_id: Option<String>,
         rate: f32,
     },
@@ -33,6 +49,14 @@ pub struct VoiceInfo {
     pub name: String,
     pub locale: Option<String>,
     pub gender: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PreparedUtterance {
+    pub utterance_index: usize,
+    pub text: String,
+    pub start_offset: usize,
+    pub end_offset: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -52,6 +76,18 @@ pub enum Message {
         id: String,
         document_id: String,
         utterance_count: usize,
+    },
+    PrepareSpeechResult {
+        id: String,
+        document_id: String,
+        language_code: Option<String>,
+        utterances: Vec<PreparedUtterance>,
+    },
+    PrepareSummaryResult {
+        id: String,
+        document_id: String,
+        language_code: Option<String>,
+        utterances: Vec<PreparedUtterance>,
     },
     SpeakResult {
         id: String,

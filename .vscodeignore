@@ -4,6 +4,10 @@ native/**
 dist/test/**
 **/*.map
 .cargo-home/**
+.venv-mlx/**
+.venv*/**
+**/__pycache__/**
+**/*.pyc
 node_modules/**
 package-lock.json
 .gitignore

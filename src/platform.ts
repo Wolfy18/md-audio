@@ -30,8 +30,14 @@ export function nativeBinaryName(platformKey: string): string {
   return platformKey.startsWith("win32-") ? "md-audio-native.exe" : "md-audio-native";
 }
 
+export function supportsMlxLocal(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): boolean {
+  return platform === "darwin" && arch === "arm64";
+}
+
 export function resolveNativeBinaryPath(extensionPath: string): string {
   const platformKey = resolvePlatformKey();
   return path.join(extensionPath, "dist", "native", platformKey, nativeBinaryName(platformKey));
 }
-

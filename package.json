@@ -1,8 +1,8 @@
 {
   "name": "md-audio",
   "displayName": "MD Audio",
-  "description": "Offline-first Markdown read-aloud for VS Code and Cursor powered by a Rust core and system TTS.",
-  "version": "0.0.1",
+  "description": "Markdown read-aloud for VS Code and Cursor powered by a Rust core, local Kokoro TTS on Apple Silicon, and system TTS fallback.",
+  "version": "0.0.18",
   "publisher": "wleon",
   "license": "MIT",
   "engines": {
@@ -24,7 +24,9 @@
     "onCommand:mdAudio.speakDocument",
     "onCommand:mdAudio.speakFromCursor",
     "onCommand:mdAudio.speakSelection",
+    "onCommand:mdAudio.speakSummary",
     "onCommand:mdAudio.stop",
+    "onCommand:mdAudio.changeSpeed",
     "onCommand:mdAudio.selectVoice",
     "onCommand:mdAudio.listVoices",
     "onCommand:mdAudio.checkBackend"
@@ -61,10 +63,22 @@
         "icon": "$(selection)"
       },
       {
+        "command": "mdAudio.speakSummary",
+        "title": "Listen to Summary",
+        "category": "MD Audio",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "mdAudio.stop",
         "title": "Stop",
         "category": "MD Audio",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "mdAudio.changeSpeed",
+        "title": "Change Speed",
+        "category": "MD Audio",
+        "icon": "$(dashboard)"
       },
       {
         "command": "mdAudio.selectVoice",
@@ -93,6 +107,11 @@
           "command": "mdAudio.stop",
           "group": "navigation@49",
           "when": "editorLangId == markdown && config.mdAudio.showEditorButtons"
+        },
+        {
+          "command": "mdAudio.changeSpeed",
+          "group": "navigation@48",
+          "when": "editorLangId == markdown && config.mdAudio.showEditorButtons"
         }
       ]
     },
@@ -102,14 +121,34 @@
         "mdAudio.voice": {
           "type": "string",
           "default": "",
-          "description": "Preferred system TTS voice identifier."
+          "description": "Preferred system TTS voice identifier when using the system backend."
+        },
+        "mdAudio.backend": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "system",
+            "mlx-kokoro"
+          ],
+          "default": "auto",
+          "description": "Playback backend. 'auto' prefers the local MLX/Kokoro backend on Apple Silicon and falls back to system TTS."
+        },
+        "mdAudio.uvPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional uv executable override used to create MD Audio's private MLX/Kokoro environment. After provisioning, MD Audio uses its managed interpreter automatically."
+        },
+        "mdAudio.mlxModel": {
+          "type": "string",
+          "default": "mlx-community/Kokoro-82M-bf16",
+          "description": "MLX/Kokoro model repo or local path used for local neural speech."
         },
         "mdAudio.rate": {
           "type": "number",
           "default": 1,
           "minimum": 0.5,
           "maximum": 2,
-          "description": "Speech rate multiplier applied by the native backend."
+          "description": "Playback speed multiplier. 1.0 is the default speaking rate."
         },
         "mdAudio.highlightCurrentUtterance": {
           "type": "boolean",

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Utterance {
@@ -12,7 +12,6 @@ pub struct Utterance {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Context {
     Heading {
-        level: usize,
         text: String,
         range: Option<Range<usize>>,
     },
@@ -78,8 +77,7 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
     for (event, range) in parser {
         match event {
             Event::Start(tag) => match tag {
-                Tag::Heading { level, .. } => stack.push(Context::Heading {
-                    level: heading_level(level),
+                Tag::Heading { .. } => stack.push(Context::Heading {
                     text: String::new(),
                     range: None,
                 }),
@@ -117,12 +115,8 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
             },
             Event::End(tag) => match tag {
                 TagEnd::Heading(_) => {
-                    if let Some(Context::Heading { level, text, range }) = stack.pop() {
-                        finalize_text(
-                            &mut utterances,
-                            format!("Heading level {level}. {text}"),
-                            range,
-                        );
+                    if let Some(Context::Heading { text, range }) = stack.pop() {
+                        finalize_text(&mut utterances, text, range);
                     }
                 }
                 TagEnd::Paragraph => {
@@ -143,17 +137,17 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                         checked,
                     }) = stack.pop()
                     {
-                        let prefix = match checked {
-                            Some(true) => "List item. Checked. ",
-                            Some(false) => "List item. Unchecked. ",
-                            None => "List item. ",
+                        let rendered = match checked {
+                            Some(true) => format!("Done: {text}"),
+                            Some(false) => format!("To do: {text}"),
+                            None => text,
                         };
-                        finalize_text(&mut utterances, format!("{prefix}{text}"), range);
+                        finalize_text(&mut utterances, rendered, range);
                     }
                 }
                 TagEnd::BlockQuote(_) => {
                     if let Some(Context::BlockQuote { text, range }) = stack.pop() {
-                        finalize_text(&mut utterances, format!("Quote. {text}"), range);
+                        finalize_text(&mut utterances, text, range);
                     }
                 }
                 TagEnd::TableHead => {
@@ -163,12 +157,8 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                         is_header,
                     }) = stack.pop()
                     {
-                        let prefix = if is_header {
-                            "Table header. "
-                        } else {
-                            "Table row. "
-                        };
-                        finalize_text(&mut utterances, format!("{prefix}{}", cells.join("; ")), range);
+                        let text = render_table_row(&cells, is_header);
+                        finalize_text(&mut utterances, text, range);
                     }
                 }
                 TagEnd::TableCell => {
@@ -196,12 +186,8 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
                         is_header,
                     }) = stack.pop()
                     {
-                        let prefix = if is_header {
-                            "Table header. "
-                        } else {
-                            "Table row. "
-                        };
-                        finalize_text(&mut utterances, format!("{prefix}{}", cells.join("; ")), range);
+                        let text = render_table_row(&cells, is_header);
+                        finalize_text(&mut utterances, text, range);
                     }
                 }
                 TagEnd::CodeBlock | TagEnd::MetadataBlock(_) | TagEnd::Image => {
@@ -212,7 +198,10 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
             Event::Text(value) if ignored_depth == 0 => {
                 append_to_nearest_context(&mut stack, value.as_ref(), &range);
             }
-            Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => {}
+            Event::Code(value) if ignored_depth == 0 => {
+                append_to_nearest_context(&mut stack, render_inline_code(value.as_ref()).as_str(), &range);
+            }
+            Event::Html(_) | Event::InlineHtml(_) => {}
             Event::SoftBreak | Event::HardBreak if ignored_depth == 0 => {
                 append_to_nearest_context(&mut stack, " ", &range);
             }
@@ -281,16 +270,27 @@ fn normalize_whitespace(input: &str) -> String {
 
 fn push_spaced(target: &mut String, value: &str) {
     let cleaned = value.replace('\n', " ");
+    let trimmed = cleaned.trim();
 
-    if cleaned.trim().is_empty() {
+    if trimmed.is_empty() {
         return;
     }
 
-    if !target.is_empty() && !target.ends_with(' ') {
+    if !target.is_empty()
+        && !target.ends_with(' ')
+        && !starts_with_inline_punctuation(trimmed)
+    {
         target.push(' ');
     }
 
-    target.push_str(cleaned.trim());
+    target.push_str(trimmed);
+}
+
+fn starts_with_inline_punctuation(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .is_some_and(|character| matches!(character, '.' | ',' | ':' | ';' | '!' | '?'))
 }
 
 fn merge_range(target: &mut Option<Range<usize>>, incoming: &Range<usize>) {
@@ -305,15 +305,17 @@ fn merge_range(target: &mut Option<Range<usize>>, incoming: &Range<usize>) {
     }
 }
 
-fn heading_level(level: HeadingLevel) -> usize {
-    match level {
-        HeadingLevel::H1 => 1,
-        HeadingLevel::H2 => 2,
-        HeadingLevel::H3 => 3,
-        HeadingLevel::H4 => 4,
-        HeadingLevel::H5 => 5,
-        HeadingLevel::H6 => 6,
-    }
+fn render_inline_code(value: &str) -> String {
+    value
+        .replace('_', " ")
+        .replace("::", " ")
+        .replace('/', " ")
+        .replace('\\', " ")
+}
+
+fn render_table_row(cells: &[String], is_header: bool) -> String {
+    let separator = if is_header { ", " } else { "; " };
+    cells.join(separator)
 }
 
 fn chunk_text(input: &str) -> Vec<String> {
@@ -358,18 +360,18 @@ mod tests {
         let source = "---\ntitle: Demo\n---\n# Hello\n\nWorld";
         let utterances = parse_markdown(source);
 
-        assert_eq!(utterances[0].text, "Heading level 1. Hello");
+        assert_eq!(utterances[0].text, "Hello");
         assert_eq!(utterances[1].text, "World");
         assert!(utterances[0].start_offset >= source.find("Hello").unwrap());
     }
 
     #[test]
-    fn skips_inline_and_block_code() {
+    fn keeps_inline_code_and_skips_block_code() {
         let source = "Paragraph with `code` text.\n\n```rs\nlet hidden = true;\n```\n\nAfter";
         let utterances = parse_markdown(source);
 
         assert_eq!(utterances.len(), 2);
-        assert_eq!(utterances[0].text, "Paragraph with text.");
+        assert_eq!(utterances[0].text, "Paragraph with code text.");
         assert_eq!(utterances[1].text, "After");
     }
 
@@ -378,8 +380,8 @@ mod tests {
         let source = "- [x] ship the [docs](https://example.com)\n- [ ] follow up";
         let utterances = parse_markdown(source);
 
-        assert_eq!(utterances[0].text, "List item. Checked. ship the docs");
-        assert_eq!(utterances[1].text, "List item. Unchecked. follow up");
+        assert_eq!(utterances[0].text, "Done: ship the docs");
+        assert_eq!(utterances[1].text, "To do: follow up");
     }
 
     #[test]
@@ -387,9 +389,17 @@ mod tests {
         let source = "> quoted text\n\n| Name | Score |\n| --- | --- |\n| Ada | 10 |";
         let utterances = parse_markdown(source);
 
-        assert_eq!(utterances[0].text, "Quote. quoted text");
-        assert_eq!(utterances[1].text, "Table header. Name; Score");
-        assert_eq!(utterances[2].text, "Table row. Ada; 10");
+        assert_eq!(utterances[0].text, "quoted text");
+        assert_eq!(utterances[1].text, "Name, Score");
+        assert_eq!(utterances[2].text, "Ada; 10");
+    }
+
+    #[test]
+    fn renders_inline_identifiers_more_naturally() {
+        let source = "Use `OPENAI_API_KEY` with `src/lib.rs`.";
+        let utterances = parse_markdown(source);
+
+        assert_eq!(utterances[0].text, "Use OPENAI API KEY with src lib.rs.");
     }
 
     #[test]

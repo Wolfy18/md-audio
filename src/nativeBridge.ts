@@ -11,6 +11,8 @@ import type {
   NativeEvent,
   NativeRequest,
   NativeResponse,
+  PrepareSpeechResult,
+  PrepareSummaryResult,
   SpeakResult,
   StopResult,
 } from "./protocol";
@@ -68,6 +70,26 @@ export class NativeBridge {
     });
   }
 
+  prepareSpeech(payload: {
+    documentId: string;
+    startOffset?: number;
+    endOffset?: number;
+  }): Promise<PrepareSpeechResult> {
+    return this.send<PrepareSpeechResult>({
+      type: "prepare_speech",
+      document_id: payload.documentId,
+      start_offset: payload.startOffset,
+      end_offset: payload.endOffset,
+    });
+  }
+
+  prepareSummary(documentId: string): Promise<PrepareSummaryResult> {
+    return this.send<PrepareSummaryResult>({
+      type: "prepare_summary",
+      document_id: documentId,
+    });
+  }
+
   speak(payload: {
     documentId: string;
     startOffset?: number;
@@ -80,6 +102,19 @@ export class NativeBridge {
       document_id: payload.documentId,
       start_offset: payload.startOffset,
       end_offset: payload.endOffset,
+      voice_id: payload.voiceId,
+      rate: payload.rate,
+    });
+  }
+
+  speakSummary(payload: {
+    documentId: string;
+    voiceId?: string;
+    rate: number;
+  }): Promise<SpeakResult> {
+    return this.send<SpeakResult>({
+      type: "speak_summary",
+      document_id: payload.documentId,
       voice_id: payload.voiceId,
       rate: payload.rate,
     });

@@ -1,13 +1,28 @@
+#![allow(unexpected_cfgs)]
+
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use md_audio_native::language::{SupportedLanguage, detect_supported_language};
 use md_audio_native::markdown::{Utterance, parse_markdown};
-use md_audio_native::protocol::{Message, Request};
+use md_audio_native::protocol::{Message, PreparedUtterance, Request};
 use md_audio_native::speech::{SpeechEngine, SpeechEvent};
+use md_audio_native::summary::summarize_utterances;
 use tts::UtteranceId;
+
+#[cfg(target_os = "macos")]
+use cocoa_foundation::base::id;
+#[cfg(target_os = "macos")]
+use cocoa_foundation::foundation::{NSDefaultRunLoopMode, NSRunLoop};
+#[cfg(target_os = "macos")]
+use objc::class;
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl};
 
 #[derive(Clone, Debug)]
 struct SpokenUtterance {
@@ -18,10 +33,16 @@ struct SpokenUtterance {
     text: String,
 }
 
+#[derive(Clone, Debug)]
+struct LoadedDocument {
+    utterances: Vec<Utterance>,
+    language: Option<SupportedLanguage>,
+}
+
 struct AppState {
     speech: Option<SpeechEngine>,
     backend_error: Option<String>,
-    documents: HashMap<String, Vec<Utterance>>,
+    documents: HashMap<String, LoadedDocument>,
     spoken: Vec<(String, SpokenUtterance)>,
 }
 
@@ -78,12 +99,84 @@ impl AppState {
                 text,
             } => {
                 let utterances = parse_markdown(&text);
+                let detected_language = detect_supported_language(
+                    &utterances
+                        .iter()
+                        .map(|utterance| utterance.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
                 let utterance_count = utterances.len();
-                self.documents.insert(document_id.clone(), utterances);
+                self.documents.insert(
+                    document_id.clone(),
+                    LoadedDocument {
+                        utterances,
+                        language: detected_language,
+                    },
+                );
                 Message::LoadDocumentResult {
                     id,
                     document_id,
                     utterance_count,
+                }
+            }
+            Request::PrepareSpeech {
+                id,
+                document_id,
+                start_offset,
+                end_offset,
+            } => {
+                let Some(document) = self.documents.get(&document_id) else {
+                    return Message::ErrorResult {
+                        id,
+                        code: "document_not_loaded".to_string(),
+                        message: format!("document '{document_id}' is not loaded"),
+                    };
+                };
+
+                let utterances = select_utterances(&document.utterances, start_offset, end_offset)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(utterance_index, utterance)| PreparedUtterance {
+                        utterance_index,
+                        text: utterance.text,
+                        start_offset: utterance.start_offset,
+                        end_offset: utterance.end_offset,
+                    })
+                    .collect();
+
+                Message::PrepareSpeechResult {
+                    id,
+                    document_id,
+                    language_code: document.language.map(|language| language.code().to_string()),
+                    utterances,
+                }
+            }
+            Request::PrepareSummary { id, document_id } => {
+                let Some(document) = self.documents.get(&document_id) else {
+                    return Message::ErrorResult {
+                        id,
+                        code: "document_not_loaded".to_string(),
+                        message: format!("document '{document_id}' is not loaded"),
+                    };
+                };
+
+                let utterances = summarize_utterances(&document.utterances)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(utterance_index, utterance)| PreparedUtterance {
+                        utterance_index,
+                        text: utterance.text,
+                        start_offset: utterance.start_offset,
+                        end_offset: utterance.end_offset,
+                    })
+                    .collect();
+
+                Message::PrepareSummaryResult {
+                    id,
+                    document_id,
+                    language_code: document.language.map(|language| language.code().to_string()),
+                    utterances,
                 }
             }
             Request::Speak {
@@ -94,7 +187,7 @@ impl AppState {
                 voice_id,
                 rate,
             } => {
-                let Some(utterances) = self.documents.get(&document_id).cloned() else {
+                let Some(document) = self.documents.get(&document_id).cloned() else {
                     return Message::ErrorResult {
                         id,
                         code: "document_not_loaded".to_string(),
@@ -102,14 +195,53 @@ impl AppState {
                     };
                 };
 
-                match self.queue_document(&document_id, &utterances, start_offset, end_offset, voice_id, rate)
-                {
+                match self.queue_document(
+                    &document_id,
+                    &document.utterances,
+                    document.language,
+                    start_offset,
+                    end_offset,
+                    voice_id,
+                    rate,
+                ) {
                     Ok(queued) => Message::SpeakResult {
                         id,
                         document_id,
                         queued,
                     },
                     Err(error) => self.error_message(id, "speak_failed", error),
+                }
+            }
+            Request::SpeakSummary {
+                id,
+                document_id,
+                voice_id,
+                rate,
+            } => {
+                let Some(document) = self.documents.get(&document_id).cloned() else {
+                    return Message::ErrorResult {
+                        id,
+                        code: "document_not_loaded".to_string(),
+                        message: format!("document '{document_id}' is not loaded"),
+                    };
+                };
+
+                let summary = summarize_utterances(&document.utterances);
+                match self.queue_document(
+                    &document_id,
+                    &summary,
+                    document.language,
+                    None,
+                    None,
+                    voice_id,
+                    rate,
+                ) {
+                    Ok(queued) => Message::SpeakResult {
+                        id,
+                        document_id,
+                        queued,
+                    },
+                    Err(error) => self.error_message(id, "speak_summary_failed", error),
                 }
             }
             Request::Stop { id } => match self.with_speech_mut(|speech| speech.stop()) {
@@ -154,6 +286,7 @@ impl AppState {
         &mut self,
         document_id: &str,
         utterances: &[Utterance],
+        language: Option<SupportedLanguage>,
         start_offset: Option<usize>,
         end_offset: Option<usize>,
         voice_id: Option<String>,
@@ -171,7 +304,7 @@ impl AppState {
             .as_mut()
             .context(self.backend_error.clone().unwrap_or_else(|| "system TTS backend is unavailable".to_string()))?;
 
-        speech.configure(voice_id.as_deref(), rate)?;
+        speech.configure(voice_id.as_deref(), language, rate)?;
         speech.stop()?;
 
         for (utterance_index, utterance) in selected.iter().enumerate() {
@@ -211,6 +344,16 @@ impl AppState {
             message: error.to_string(),
         }
     }
+
+    fn is_speaking(&mut self) -> bool {
+        match self.speech.as_ref() {
+            Some(speech) => match speech.is_speaking() {
+                Ok(is_speaking) => is_speaking,
+                Err(_) => !self.spoken.is_empty(),
+            },
+            None => false,
+        }
+    }
 }
 
 fn utterance_key(utterance_id: &UtteranceId) -> String {
@@ -220,23 +363,40 @@ fn utterance_key(utterance_id: &UtteranceId) -> String {
 fn main() -> Result<()> {
     let (request_sender, request_receiver) = mpsc::channel::<Request>();
     let (speech_sender, speech_receiver) = mpsc::channel::<SpeechEvent>();
+    let request_poll_interval = Duration::from_millis(25);
 
     spawn_stdin_reader(request_sender);
 
     let mut app = AppState::new(speech_sender);
     let stdout = io::stdout();
     let mut writer = stdout.lock();
+    let mut requests_closed = false;
 
     loop {
+        pump_platform_run_loop();
+
         while let Ok(event) = speech_receiver.try_recv() {
             if let Some(message) = app.handle_speech_event(event) {
                 write_message(&mut writer, &message)?;
             }
         }
 
-        let request = match request_receiver.recv() {
+        if requests_closed {
+            if app.is_speaking() {
+                thread::sleep(request_poll_interval);
+                continue;
+            }
+
+            break;
+        }
+
+        let request = match request_receiver.recv_timeout(request_poll_interval) {
             Ok(request) => request,
-            Err(_) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => {
+                requests_closed = true;
+                continue;
+            }
         };
 
         let message = app.handle_request(request);
@@ -258,6 +418,18 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+fn pump_platform_run_loop() {
+    let run_loop: id = unsafe { NSRunLoop::currentRunLoop() };
+    unsafe {
+        let date: id = msg_send![class!(NSDate), dateWithTimeIntervalSinceNow: 0.01f64];
+        let _: () = msg_send![run_loop, runMode:NSDefaultRunLoopMode beforeDate:date];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pump_platform_run_loop() {}
 
 fn spawn_stdin_reader(sender: Sender<Request>) {
     thread::spawn(move || {

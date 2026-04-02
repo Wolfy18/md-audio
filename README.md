@@ -1,23 +1,32 @@
 # MD Audio
 
-MD Audio is a VS Code and Cursor extension that reads Markdown aloud offline through a Rust native binary and your operating system's built-in voices.
+MD Audio is a VS Code and Cursor extension that reads Markdown aloud offline through a Rust native parser, a local Kokoro MLX backend on Apple Silicon, and system TTS fallback elsewhere.
 
 ## Current scope
 
 - Live read-aloud for the whole Markdown document, from the current cursor, or from the current selection
-- Offline-first system TTS backend, no API key required
-- Rust markdown parser and speech backend connected to the extension host over JSON lines on stdio
-- Highlighting for the currently spoken utterance when the backend emits utterance callbacks
+- Offline summary playback that extracts the key parts of a Markdown file and reads them aloud
+- English and Spanish document support only
+- Automatic English/Spanish document detection with one fixed local speaker for MLX playback
+- Local MLX/Kokoro playback on Apple Silicon with system TTS fallback
+- MLX/Kokoro synthesis batches consecutive passages to reduce voice drift between lines
+- Rust markdown parser connected to the extension host over JSON lines on stdio
+- Highlighting for the currently spoken utterance during playback
+- Status bar playback controls for Listen, Stop, and speed changes while reading
 
 ## Commands
 
 - `MD Audio: Listen to Document`
 - `MD Audio: Listen From Cursor`
 - `MD Audio: Listen to Selection`
+- `MD Audio: Listen to Summary`
+- `MD Audio: Change Speed`
 - `MD Audio: Stop`
 - `MD Audio: Select Voice`
 - `MD Audio: List Voices`
 - `MD Audio: Check Backend`
+
+`MD Audio: Select Voice` still selects the system voice when you use the system backend. The local MLX/Kokoro backend is locked to one fixed speaker.
 
 ## Development
 
@@ -29,6 +38,32 @@ npm run package:vsix
 ```
 
 The native build uses a repo-local Cargo cache at `.cargo-home/` and compiles the Rust binary from `native/`.
+
+## Local MLX setup
+
+For the local-model path on Apple Silicon, MD Audio now creates a private MLX/Kokoro environment under the extension's global storage directory with `uv`. It no longer depends on the current repo's `.venv`.
+
+```bash
+brew install uv
+# and ensure espeak-ng is installed, for example:
+brew install espeak-ng
+```
+
+If MD Audio cannot find `uv`, point `mdAudio.uvPath` at the `uv` executable you want it to use:
+
+```json
+{
+  "mdAudio.backend": "mlx-kokoro",
+  "mdAudio.uvPath": "/absolute/path/to/uv",
+  "mdAudio.mlxModel": "mlx-community/Kokoro-82M-bf16"
+}
+```
+
+After the first successful bootstrap, MD Audio always uses its managed interpreter from extension storage, regardless of which repo is open. `mdAudio.uvPath` is only an override when the machine's default `uv` installation is not the one you want MD Audio to use.
+
+The extension uses a bundled Python worker to call `mlx-audio` directly, so you do not need `uvicorn` or the `mlx_audio.server` extras.
+
+`MD Audio: Check Backend` will verify the MLX runtime and can trigger the first model load. The first successful check or listen may take longer because the selected model can be downloaded and loaded locally.
 
 ## Packaging
 
@@ -47,6 +82,8 @@ To package a non-host target, set `MD_AUDIO_TARGET` before running the package s
 MD_AUDIO_TARGET=x86_64-unknown-linux-gnu npm run package:vsix
 ```
 
-## Linux note
+## Notes
 
-Linux support depends on a system speech backend such as Speech Dispatcher. If the backend is missing, `MD Audio: Check Backend` will report the native error instead of failing silently.
+Linux support depends on a system speech backend such as Speech Dispatcher when using the fallback system path.
+
+The local MLX/Kokoro backend currently targets macOS on Apple Silicon and uses `afplay` for audio playback.

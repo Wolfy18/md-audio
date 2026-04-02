@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nativeBinaryName, resolvePlatformKey } from "../platform";
+import { nativeBinaryName, resolvePlatformKey, supportsMlxLocal } from "../platform";
 
 test("resolves supported platform keys", () => {
   assert.equal(resolvePlatformKey("darwin", "arm64"), "darwin-arm64");
@@ -13,3 +13,8 @@ test("returns correct binary name for Windows", () => {
   assert.equal(nativeBinaryName("darwin-arm64"), "md-audio-native");
 });
 
+test("detects Apple Silicon support for MLX", () => {
+  assert.equal(supportsMlxLocal("darwin", "arm64"), true);
+  assert.equal(supportsMlxLocal("darwin", "x64"), false);
+  assert.equal(supportsMlxLocal("linux", "arm64"), false);
+});
