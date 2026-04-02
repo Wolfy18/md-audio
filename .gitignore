@@ -3,4 +3,5 @@ node_modules/
 .cargo-home/
 *.vsix
 native/target/
-
+__pycache__/
+*.pyc
