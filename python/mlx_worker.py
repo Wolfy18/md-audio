@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from mlx_audio.audio_io import write as audio_write
-from mlx_audio.tts.utils import load_model
 
 
 @dataclass
@@ -35,6 +33,7 @@ def ensure_model(model_name: str):
         return STATE.model
 
     verify_kokoro_runtime(model_name)
+    from mlx_audio.tts.utils import load_model
 
     with contextlib.redirect_stdout(sys.stderr):
         STATE.model = load_model(model_name)
@@ -61,6 +60,7 @@ def verify_kokoro_runtime(model_name: str) -> None:
                 f"Kokoro is missing the Python dependency '{module_name}'. Install it with: {install_hint}"
             )
 
+    import espeakng_loader
     from phonemizer.backend.espeak.wrapper import EspeakWrapper
 
     if not hasattr(EspeakWrapper, "set_data_path"):
@@ -73,6 +73,11 @@ def verify_kokoro_runtime(model_name: str) -> None:
             "Kokoro requires espeak-ng or espeak on this machine. Install it with Homebrew, for example: brew install espeak-ng"
         )
 
+    # Prefer the packaged espeak-ng assets bundled with espeakng-loader instead of
+    # any compile-time fallback path that may point at a build machine.
+    EspeakWrapper.set_library(espeakng_loader.get_library_path())
+    EspeakWrapper.set_data_path(espeakng_loader.get_data_path())
+
 
 def synthesize(request: dict[str, Any]) -> str:
     model_name = str(request["model"])
@@ -83,6 +88,7 @@ def synthesize(request: dict[str, Any]) -> str:
     output_path = str(request["output_path"])
 
     model = ensure_model(model_name)
+    from mlx_audio.audio_io import write as audio_write
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     audio_chunks: list[np.ndarray] = []
