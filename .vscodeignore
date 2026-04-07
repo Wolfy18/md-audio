@@ -6,6 +6,7 @@ dist/test/**
 .cargo-home/**
 .venv-mlx/**
 .venv*/**
+.npm-cache/**
 **/__pycache__/**
 **/*.pyc
 node_modules/**
