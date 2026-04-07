@@ -12,6 +12,12 @@ import { NativeBridge } from "./nativeBridge";
 import type { NativeUtteranceEvent, NativeVoice, PreparedUtterance } from "./protocol";
 import { readSettings, type MdAudioSettings } from "./settings";
 import { SPEED_PRESETS, formatSpeed } from "./speed";
+import {
+  SummaryPreparationController,
+  summaryStatusText,
+  summaryStatusTooltip,
+  type SummaryPreparationState,
+} from "./summaryPreparation";
 
 type ListenMode = "document" | "from-cursor" | "selection" | "summary";
 type PlaybackBackend = "system" | typeof MLX_BACKEND_ID;
@@ -75,6 +81,7 @@ export function activate(context: vscode.ExtensionContext): void {
     log: (message) => output.appendLine(message),
   });
   const highlight = new HighlightController<vscode.Range>();
+  const summaryPreparation = new SummaryPreparationController();
 
   let lastHighlightedEditor: vscode.TextEditor | undefined;
   let currentPlayback: PlaybackState | undefined;
@@ -119,6 +126,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const isActiveDocumentPlaying =
       !!currentPlayback && activeEditor?.document.uri.toString() === currentPlayback.documentId;
     const isSummaryPlaying = isActiveDocumentPlaying && currentPlayback?.mode === "summary";
+    const currentSummaryPreparation = summaryPreparation.current();
+    const isSummaryPreparing =
+      !!currentSummaryPreparation &&
+      activeEditor?.document.uri.toString() === currentSummaryPreparation.documentId;
     const hasPlayback = !!currentPlayback;
     const settings = getSettings();
 
@@ -127,8 +138,13 @@ export function activate(context: vscode.ExtensionContext): void {
     listenStatusItem.tooltip = "Listen to the current Markdown document";
     listenStatusItem.command = "mdAudio.speakDocument";
 
-    summaryStatusItem.text = isSummaryPlaying ? "$(sync~spin) Summary" : "$(list-tree) Summary";
-    summaryStatusItem.tooltip = "Listen to a summary of the current Markdown document";
+    summaryStatusItem.text = summaryStatusText(
+      isSummaryPreparing ? currentSummaryPreparation : undefined,
+      isSummaryPlaying,
+    );
+    summaryStatusItem.tooltip = summaryStatusTooltip(
+      isSummaryPreparing ? currentSummaryPreparation : undefined,
+    );
     summaryStatusItem.command = "mdAudio.speakSummary";
 
     speedStatusItem.text = `$(dashboard) ${formatSpeed(settings.rate)}`;
@@ -153,7 +169,7 @@ export function activate(context: vscode.ExtensionContext): void {
       speedStatusItem.hide();
     }
 
-    if (hasPlayback) {
+    if (hasPlayback || !!currentSummaryPreparation) {
       stopStatusItem.show();
     } else {
       stopStatusItem.hide();
@@ -230,6 +246,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const prepareSummaryPlayback = async (document: vscode.TextDocument): Promise<PreparedPlayback> => {
     const documentId = document.uri.toString();
     await bridge.loadDocument(documentId, document.getText());
+    const activePreparation = summaryPreparation.current();
+    if (activePreparation?.documentId === documentId) {
+      setSummaryPreparationPhase(activePreparation.token, "building_summary");
+    }
 
     const prepared = await bridge.prepareSummary(documentId);
     return {
@@ -242,6 +262,31 @@ export function activate(context: vscode.ExtensionContext): void {
     mode === "summary"
       ? "MD Audio could not build a summary for this Markdown file."
       : "Nothing speakable was found in the selected Markdown range.";
+
+  const beginSummaryPreparation = (documentId: string): SummaryPreparationState | undefined => {
+    const started = summaryPreparation.start(documentId);
+    if (!started) {
+      return undefined;
+    }
+
+    updatePlaybackControls();
+    return started;
+  };
+
+  const setSummaryPreparationPhase = (
+    token: number,
+    phase: SummaryPreparationState["phase"],
+  ): void => {
+    summaryPreparation.advance(token, phase);
+    updatePlaybackControls();
+  };
+
+  const finishSummaryPreparation = (token?: number): void => {
+    summaryPreparation.finish(token);
+    updatePlaybackControls();
+  };
+
+  const isSummaryPreparationActive = (token: number): boolean => summaryPreparation.isActive(token);
 
   const handleUtteranceEvent = (event: NativeUtteranceEvent): void => {
     const settings = getSettings();
@@ -289,9 +334,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const stopPlayback = async (notice?: string): Promise<void> => {
     const playback = currentPlayback;
+    const activeSummaryPreparation = summaryPreparation.current();
     if (!playback) {
+      if (activeSummaryPreparation) {
+        finishSummaryPreparation(activeSummaryPreparation.token);
+      }
       clearHighlight();
       updatePlaybackControls();
+      if (notice) {
+        void vscode.window.showInformationMessage(notice);
+      }
       return;
     }
 
@@ -305,6 +357,9 @@ export function activate(context: vscode.ExtensionContext): void {
       showError(error);
     } finally {
       currentPlayback = undefined;
+      if (activeSummaryPreparation) {
+        finishSummaryPreparation(activeSummaryPreparation.token);
+      }
       clearHighlight();
       updatePlaybackControls();
     }
@@ -411,6 +466,54 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
+  const startSystemSummaryPlayback = async (
+    document: vscode.TextDocument,
+    prepared: PreparedPlayback,
+    rate: number,
+    settings: MdAudioSettings,
+    showNotice: boolean,
+  ): Promise<void> => {
+    const documentId = document.uri.toString();
+
+    await ensureSystemBackendReady();
+
+    if (prepared.utterances.length === 0) {
+      currentPlayback = undefined;
+      clearHighlight();
+      updatePlaybackControls();
+      void vscode.window.showInformationMessage(emptyPlaybackMessage("summary"));
+      return;
+    }
+
+    const result = await bridge.speakSummary({
+      documentId,
+      voiceId: settings.voice || undefined,
+      rate,
+    });
+
+    if (result.queued === 0) {
+      currentPlayback = undefined;
+      clearHighlight();
+      updatePlaybackControls();
+      void vscode.window.showInformationMessage(emptyPlaybackMessage("summary"));
+      return;
+    }
+
+    currentPlayback = {
+      token: ++nextPlaybackToken,
+      backend: "system",
+      mode: "summary",
+      documentId,
+      remainingUtterances: result.queued,
+      currentOffset: undefined,
+    };
+    updatePlaybackControls();
+
+    if (showNotice) {
+      void showPlaybackStartedNotice(rate, "system", "summary", "system voice");
+    }
+  };
+
   const startMlxPlayback = async (
     document: vscode.TextDocument,
     selection: PlaybackSelection,
@@ -484,18 +587,54 @@ export function activate(context: vscode.ExtensionContext): void {
     mode: ListenMode,
     showNotice: boolean,
   ): Promise<void> => {
+    const activeSummaryPreparation = summaryPreparation.current();
+    if (activeSummaryPreparation) {
+      finishSummaryPreparation(activeSummaryPreparation.token);
+    }
+
     if (currentPlayback) {
       await stopPlayback();
     }
 
     const settings = getSettings();
+
+    if (mode === "summary") {
+      const documentId = document.uri.toString();
+      const summaryState = beginSummaryPreparation(documentId);
+      if (!summaryState) {
+        return;
+      }
+
+      try {
+        setSummaryPreparationPhase(summaryState.token, "loading_document");
+        const prepared = await prepareSummaryPlayback(document);
+        if (!isSummaryPreparationActive(summaryState.token)) {
+          return;
+        }
+
+        setSummaryPreparationPhase(summaryState.token, "preparing_backend");
+        const backend = await resolvePlaybackBackend(settings);
+        if (!isSummaryPreparationActive(summaryState.token)) {
+          return;
+        }
+
+        setSummaryPreparationPhase(summaryState.token, "starting_playback");
+        if (backend === MLX_BACKEND_ID) {
+          await startMlxPlayback(document, selection, prepared, rate, settings, mode, showNotice);
+          return;
+        }
+
+        await startSystemSummaryPlayback(document, prepared, rate, settings, showNotice);
+        return;
+      } finally {
+        finishSummaryPreparation(summaryState.token);
+      }
+    }
+
     const backend = await resolvePlaybackBackend(settings);
 
     if (backend === MLX_BACKEND_ID) {
-      const prepared =
-        mode === "summary"
-          ? await prepareSummaryPlayback(document)
-          : await preparePlayback(document, selection);
+      const prepared = await preparePlayback(document, selection);
       await startMlxPlayback(document, selection, prepared, rate, settings, mode, showNotice);
       return;
     }
@@ -507,6 +646,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const editor = ensureMarkdownEditor();
     const settings = getSettings();
     const selection = mode === "summary" ? {} : buildSpeechSelection(editor, mode);
+
+    if (mode === "summary" && summaryPreparation.isPreparing(editor.document.uri.toString())) {
+      return;
+    }
 
     await startPlayback(editor.document, selection, settings.rate, mode, true);
   };
@@ -801,6 +944,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
+      const activeSummaryPreparation = summaryPreparation.current();
+      if (activeSummaryPreparation && event.document.uri.toString() === activeSummaryPreparation.documentId) {
+        finishSummaryPreparation(activeSummaryPreparation.token);
+      }
+
       if (currentPlayback && event.document.uri.toString() === currentPlayback.documentId) {
         void stopPlayback("Markdown changed while speaking. Playback stopped.");
       }
