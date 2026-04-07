@@ -1,6 +1,7 @@
 dist/
 node_modules/
 .cargo-home/
+.npm-cache/
 *.vsix
 native/target/
 __pycache__/
