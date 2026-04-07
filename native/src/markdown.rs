@@ -20,6 +20,70 @@ pub struct Utterance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownSection {
+    pub heading: Option<Utterance>,
+    pub utterances: Vec<Utterance>,
+}
+
+impl MarkdownSection {
+    pub fn start_offset(&self) -> usize {
+        self.heading
+            .as_ref()
+            .map(|heading| heading.start_offset)
+            .or_else(|| self.utterances.first().map(|utterance| utterance.start_offset))
+            .unwrap_or(0)
+    }
+
+    pub fn end_offset(&self) -> usize {
+        self.utterances
+            .last()
+            .map(|utterance| utterance.end_offset)
+            .or_else(|| self.heading.as_ref().map(|heading| heading.end_offset))
+            .unwrap_or(self.start_offset())
+    }
+
+    pub fn heading_text(&self) -> Option<&str> {
+        self.heading.as_ref().map(|heading| heading.text.trim())
+    }
+
+    pub fn body_text(&self) -> String {
+        self.utterances
+            .iter()
+            .map(|utterance| utterance.text.trim())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.heading.is_none() && self.utterances.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedMarkdownDocument {
+    pub title: Option<Utterance>,
+    pub utterances: Vec<Utterance>,
+    pub sections: Vec<MarkdownSection>,
+}
+
+impl ParsedMarkdownDocument {
+    pub fn from_utterances(utterances: Vec<Utterance>) -> Self {
+        let title = utterances
+            .iter()
+            .find(|utterance| utterance.kind == UtteranceKind::Heading)
+            .cloned();
+        let sections = build_sections(&utterances);
+
+        Self {
+            title,
+            utterances,
+            sections,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Context {
     Heading {
         text: String,
@@ -69,7 +133,7 @@ impl Context {
     }
 }
 
-pub fn parse_markdown(text: &str) -> Vec<Utterance> {
+pub fn parse_markdown_document(text: &str) -> ParsedMarkdownDocument {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_TASKLISTS);
@@ -229,7 +293,11 @@ pub fn parse_markdown(text: &str) -> Vec<Utterance> {
         }
     }
 
-    utterances
+    ParsedMarkdownDocument::from_utterances(utterances)
+}
+
+pub fn parse_markdown(text: &str) -> Vec<Utterance> {
+    parse_markdown_document(text).utterances
 }
 
 fn append_to_nearest_context(stack: &mut [Context], value: &str, range: &Range<usize>) {
@@ -334,6 +402,36 @@ fn render_table_row(cells: &[String], is_header: bool) -> String {
     cells.join(separator)
 }
 
+fn build_sections(utterances: &[Utterance]) -> Vec<MarkdownSection> {
+    let mut sections = Vec::new();
+    let mut current = MarkdownSection {
+        heading: None,
+        utterances: Vec::new(),
+    };
+
+    for utterance in utterances {
+        if utterance.kind == UtteranceKind::Heading {
+            if !current.is_empty() {
+                sections.push(current);
+            }
+
+            current = MarkdownSection {
+                heading: Some(utterance.clone()),
+                utterances: Vec::new(),
+            };
+            continue;
+        }
+
+        current.utterances.push(utterance.clone());
+    }
+
+    if !current.is_empty() {
+        sections.push(current);
+    }
+
+    sections
+}
+
 fn chunk_text(input: &str) -> Vec<String> {
     if input.len() <= 180 {
         return vec![input.to_string()];
@@ -369,7 +467,7 @@ fn chunk_text(input: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_markdown;
+    use super::{parse_markdown, parse_markdown_document};
 
     #[test]
     fn removes_front_matter_and_reads_headings() {
@@ -426,5 +524,20 @@ mod tests {
         assert!(utterances.len() >= 2);
         assert_eq!(utterances[0].start_offset, 0);
         assert_eq!(utterances[0].end_offset, source.len());
+    }
+
+    #[test]
+    fn groups_utterances_into_sections() {
+        let source = "# Title\n\nIntro text.\n\n## Setup\n\nStep one.\n\n## Notes\n\nImportant caveat.";
+        let document = parse_markdown_document(source);
+
+        assert_eq!(document.title.as_ref().map(|title| title.text.as_str()), Some("Title"));
+        assert_eq!(document.sections.len(), 3);
+        assert_eq!(document.sections[0].heading_text(), Some("Title"));
+        assert_eq!(document.sections[0].body_text(), "Intro text.");
+        assert_eq!(document.sections[1].heading_text(), Some("Setup"));
+        assert_eq!(document.sections[1].body_text(), "Step one.");
+        assert_eq!(document.sections[2].heading_text(), Some("Notes"));
+        assert_eq!(document.sections[2].body_text(), "Important caveat.");
     }
 }

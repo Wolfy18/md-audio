@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use md_audio_native::language::{SupportedLanguage, detect_supported_language};
-use md_audio_native::markdown::{Utterance, UtteranceKind, parse_markdown};
+use md_audio_native::markdown::{Utterance, UtteranceKind, parse_markdown_document};
 use md_audio_native::protocol::{Message, PreparedUtterance, PreparedUtteranceKind, Request};
 use md_audio_native::speech::{SpeechEngine, SpeechEvent};
-use md_audio_native::summary::summarize_utterances;
+use md_audio_native::summary::summarize_document;
 use tts::UtteranceId;
 
 #[cfg(target_os = "macos")]
@@ -36,6 +36,7 @@ struct SpokenUtterance {
 #[derive(Clone, Debug)]
 struct LoadedDocument {
     utterances: Vec<Utterance>,
+    summary_utterances: Vec<Utterance>,
     language: Option<SupportedLanguage>,
 }
 
@@ -98,7 +99,9 @@ impl AppState {
                 document_id,
                 text,
             } => {
-                let utterances = parse_markdown(&text);
+                let parsed_document = parse_markdown_document(&text);
+                let utterances = parsed_document.utterances.clone();
+                let summary_utterances = summarize_document(&parsed_document);
                 let detected_language = detect_supported_language(
                     &utterances
                         .iter()
@@ -111,6 +114,7 @@ impl AppState {
                     document_id.clone(),
                     LoadedDocument {
                         utterances,
+                        summary_utterances,
                         language: detected_language,
                     },
                 );
@@ -162,7 +166,9 @@ impl AppState {
                     };
                 };
 
-                let utterances = summarize_utterances(&document.utterances)
+                let utterances = document
+                    .summary_utterances
+                    .clone()
                     .into_iter()
                     .enumerate()
                     .map(|(utterance_index, utterance)| PreparedUtterance {
@@ -228,10 +234,9 @@ impl AppState {
                     };
                 };
 
-                let summary = summarize_utterances(&document.utterances);
                 match self.queue_document(
                     &document_id,
-                    &summary,
+                    &document.summary_utterances,
                     document.language,
                     None,
                     None,

@@ -2,7 +2,7 @@
   "name": "md-audio",
   "displayName": "MD Audio",
   "description": "Markdown read-aloud for VS Code and Cursor powered by a Rust core, local Kokoro TTS on Apple Silicon, and system TTS fallback.",
-  "version": "0.0.21",
+  "version": "0.0.24",
   "publisher": "wolfy18",
   "author": "Wolfgang Leon",
   "license": "MIT",

@@ -318,6 +318,7 @@ export class MlxBackend {
   private readonly pending = new Map<string, PendingRequest>();
   private workerProcess?: ChildProcessWithoutNullStreams;
   private workerBuffer = "";
+  private workerStderrBuffer = "";
   private nextRequestId = 0;
   private bootPromise?: Promise<void>;
   private currentPlaybackId = 0;
@@ -596,6 +597,7 @@ export class MlxBackend {
   private async startWorker(): Promise<void> {
     const pythonPath = this.getPythonPath();
     const workerPath = path.join(this.extensionPath, "python", "mlx_worker.py");
+    this.workerStderrBuffer = "";
 
     const child = this.spawnProcess(pythonPath, [workerPath], {
       env: {
@@ -612,13 +614,20 @@ export class MlxBackend {
 
     child.stderr.on("data", (chunk: Buffer | string) => {
       const message = chunk.toString("utf8").trim();
+      this.appendWorkerStderr(chunk.toString("utf8"));
       if (message) {
         this.log(`[mlx-worker] ${message}`);
       }
     });
 
     child.on("exit", (code, signal) => {
-      const reason = `MLX worker exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`;
+      const stderrDetail = this.workerStderrBuffer.trim();
+      const reason = [
+        `MLX worker exited (code=${code ?? "null"}, signal=${signal ?? "null"}).`,
+        stderrDetail,
+      ]
+        .filter(Boolean)
+        .join(" ");
       this.log(reason);
       this.rejectPending(reason);
       if (this.workerProcess === child) {
@@ -770,6 +779,7 @@ export class MlxBackend {
     }
     this.workerProcess = undefined;
     this.workerBuffer = "";
+    this.workerStderrBuffer = "";
   }
 
   private rejectPending(reason: string): void {
@@ -781,6 +791,13 @@ export class MlxBackend {
 
   private getPythonPath(): string {
     return (this.lastSettingsPythonPath ?? "").trim() || managedMlxPythonPath(this.storagePath);
+  }
+
+  private appendWorkerStderr(chunk: string): void {
+    this.workerStderrBuffer += chunk;
+    if (this.workerStderrBuffer.length > 4_000) {
+      this.workerStderrBuffer = this.workerStderrBuffer.slice(-4_000);
+    }
   }
 
   private lastSettingsPythonPath?: string;

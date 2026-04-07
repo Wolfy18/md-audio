@@ -5,7 +5,7 @@ MD Audio is a VS Code and Cursor extension that reads Markdown aloud offline thr
 ## Current scope
 
 - Live read-aloud for the whole Markdown document, from the current cursor, or from the current selection
-- Offline summary playback that extracts the key parts of a Markdown file and reads them aloud
+- Offline summary playback that turns a Markdown file into a clear developer-oriented summary and reads it aloud
 - English and Spanish document support only
 - Automatic English/Spanish document detection with configurable American English and Spanish Kokoro voices
 - Local MLX/Kokoro playback on Apple Silicon with system TTS fallback
@@ -45,8 +45,6 @@ For the local-model path on Apple Silicon, MD Audio now creates a private MLX/Ko
 
 ```bash
 brew install uv
-# and ensure espeak-ng is installed, for example:
-brew install espeak-ng
 ```
 
 If MD Audio cannot find `uv`, point `mdAudio.uvPath` at the `uv` executable you want it to use:
@@ -61,7 +59,7 @@ If MD Audio cannot find `uv`, point `mdAudio.uvPath` at the `uv` executable you 
 
 After the first successful bootstrap, MD Audio always uses its managed interpreter from extension storage, regardless of which repo is open. `mdAudio.uvPath` is only an override when the machine's default `uv` installation is not the one you want MD Audio to use.
 
-The extension uses a bundled Python worker to call `mlx-audio` directly, so you do not need `uvicorn` or the `mlx_audio.server` extras.
+The extension uses a bundled Python worker to call `mlx-audio` directly, so you do not need `uvicorn` or the `mlx_audio.server` extras. The darwin-arm64 package also bundles the `espeak-ng` runtime required by Kokoro, so local playback does not require a separate `espeak-ng` install.
 
 `MD Audio: Check Backend` will verify the MLX runtime and can trigger the first model load. The first successful check or listen may take longer because the selected model can be downloaded and loaded locally.
 

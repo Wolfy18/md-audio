@@ -1,4 +1,5 @@
 import path from "node:path";
+import { access } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
@@ -57,6 +58,28 @@ function run(command, args) {
   });
 }
 
+async function ensureDarwinArm64Runtime(platformKey) {
+  if (platformKey !== "darwin-arm64") {
+    return;
+  }
+
+  const requiredPaths = [
+    path.join(repoRoot, "vendor", "espeak-ng", "darwin-arm64", "lib", "libespeak-ng.1.dylib"),
+    path.join(repoRoot, "vendor", "espeak-ng", "darwin-arm64", "share", "espeak-ng-data", "phontab"),
+    path.join(repoRoot, "vendor", "espeak-ng", "darwin-arm64", "COPYING"),
+  ];
+
+  for (const requiredPath of requiredPaths) {
+    try {
+      await access(requiredPath);
+    } catch {
+      throw new Error(
+        `Missing bundled darwin-arm64 espeak-ng runtime asset: ${requiredPath}`,
+      );
+    }
+  }
+}
+
 const requestedTarget = process.env.MD_AUDIO_TARGET?.trim();
 const platformKey = requestedTarget ? targetToPlatformKey.get(requestedTarget) : hostPlatformKey();
 
@@ -65,6 +88,8 @@ if (!platformKey) {
     `Unsupported MD_AUDIO_TARGET '${requestedTarget}'. Use one of: ${[...targetToPlatformKey.keys()].join(", ")}`,
   );
 }
+
+await ensureDarwinArm64Runtime(platformKey);
 
 const nodeCommand = process.execPath;
 const tscBin = path.join(repoRoot, "node_modules", ".bin", isWindows ? "tsc.cmd" : "tsc");
